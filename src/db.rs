@@ -193,7 +193,6 @@ pub async fn execute(
                 .iter()
                 .filter(|(h, _)| !(*h == "connection" || *h == "content-encoding"))
             {
-                // TODO factor out header filtering
                 client_response.insert_header((header_name.clone(), header_value.clone()));
             }
 
