@@ -7,7 +7,7 @@ use actix_web::{
 };
 use chrono::{DateTime, Utc};
 use r2d2_sqlite::rusqlite::named_params;
-use rusqlite::{types::FromSql, ToSql};
+use rusqlite::{types::FromSql, Row, ToSql};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -58,6 +58,22 @@ impl Into<HttpResponse> for &Entry {
             }
         }
         builder.body(self.content.clone())
+    }
+}
+
+impl TryFrom<&Row<'_>> for Entry {
+    type Error = rusqlite::Error;
+
+    fn try_from(row: &Row<'_>) -> Result<Self, Self::Error> {
+        let m: String = row.get("method")?;
+        Ok(Entry {
+            method: Method::from_str(m.as_str()).unwrap(),
+            url: row.get("url")?,
+            content: row.get("content")?,
+            headers: row.get("headers")?,
+            status_code: StatusCode::from_u16(row.get("status_code")?).unwrap(),
+            last_update: row.get("last_update")?,
+        })
     }
 }
 
@@ -183,18 +199,7 @@ pub async fn execute(
     let mut entry_iter = stmt
         .query_map(
             named_params! {":method": method, ":url": url.to_string()},
-            |row| {
-                let status_code = StatusCode::from_u16(row.get("status_code").unwrap()).unwrap();
-                let m: String = row.get("method").unwrap();
-                Ok(Entry {
-                    method: Method::from_str(m.as_str()).unwrap(),
-                    url: row.get("url")?,
-                    content: row.get("content")?,
-                    headers: row.get("headers")?,
-                    status_code,
-                    last_update: row.get("last_update")?,
-                })
-            },
+            |row| Entry::try_from(row),
         )
         .map_err(error::ErrorInternalServerError)?;
     match entry_iter.next() {
