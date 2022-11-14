@@ -12,7 +12,6 @@ use r2d2_sqlite::{self, SqliteConnectionManager};
 
 mod db;
 use db::Pool;
-use serde::{Deserialize, Serialize};
 
 static PATH_RE: &lazy_regex::Lazy<lazy_regex::Regex> =
     lazy_regex::regex!(r"^/?([a-z][a-z0-9+\-.]*:)/+");
@@ -93,7 +92,8 @@ impl TryFrom<&str> for ShakyUrl {
 }
 
 async fn cache(
-    data: web::Data<(db::CacheSettings, Pool)>,
+    settings: web::Data<db::CacheSettings>,
+    pool: web::Data<Pool>,
     client: web::Data<awc::Client>,
     url: ShakyUrl,
     req: HttpRequest,
@@ -105,21 +105,12 @@ async fn cache(
         res.append_header(("access-control-allow-headers", "*"));
         return Ok(res.finish());
     }
-    let settings = &data.0;
-    let db = &data.1;
-    let result = db::execute(&settings, &db, &req, &url.0, &client).await?;
+    let result = db::execute(&settings, &pool, &req, &url.0, &client).await?;
     log::debug!("{result:?}");
     log::debug!("{:?}", req.match_info());
     log::debug!("ShakyUrl: {:?}", url);
 
     Ok(result)
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-enum ListOrString {
-    ListV(Vec<String>),
-    StringV(String),
 }
 
 #[actix_web::main]
@@ -130,26 +121,23 @@ async fn main() -> std::io::Result<()> {
     let manager = SqliteConnectionManager::file("cache.db"); // TODO
     let pool = Pool::new(manager).unwrap();
     db::create_db(&pool).unwrap();
-    let settings = db::CacheSettings {
-        client_errors: true,
-        server_errors: false,
-        ttl: 0,
-    };
+    let settings = db::CacheSettings::new(true, false, 0);
     log::info!("starting HTTP proxy server at http://localhost:8080/proxy/");
     let client_tls_config = Arc::new(rustls_config());
     // start HTTP server
     HttpServer::new(move || {
         let client = awc::Client::builder()
-            // Wikipedia requires a User-Agent header to make requests
             .disable_timeout()
-            .add_default_header(("user-agent", "awc-example/1.0"))
+            // Some sites require a User-Agent header to make requests
+            .add_default_header(("user-agent", "caching-http-server/1.0"))
             // a "connector" wraps the stream into an encrypted connection
             .connector(awc::Connector::new().rustls(Arc::clone(&client_tls_config)))
             .finish();
         App::new()
-            // store db pool as Data object
-            .app_data(web::Data::new((settings.clone(), pool.clone())))
+            .app_data(web::Data::new(settings.clone()))
+            .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(client))
+            // .app_data(web::Data::new(select_sql))
             .wrap(middleware::Logger::default())
             .service(web::resource("/proxy/{url_no_query:https?:/.*}").route(web::to(cache)))
             .default_service(web::to(not_found))

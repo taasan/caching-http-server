@@ -3,10 +3,11 @@ use std::{collections::HashMap, str::FromStr};
 use actix_web::{
     error,
     http::{header::HeaderMap, Method, StatusCode},
-    web, Error, HttpRequest, HttpResponse, HttpResponseBuilder,
+    Error, HttpRequest, HttpResponse, HttpResponseBuilder,
 };
 use chrono::{DateTime, Utc};
-use rusqlite::{params_from_iter, types::FromSql, ToSql};
+use r2d2_sqlite::rusqlite::named_params;
+use rusqlite::{types::FromSql, ToSql};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS cache (
 )";
 
 const UPSERT_SQL: &str = "
-INSERT INTO cache (method, url, content, headers, status_code) VALUES (?, ?, ?, ?, ?)
+INSERT INTO cache (method, url, content, headers, status_code) VALUES (:method, :url, :content, :headers, :status_code)
  ON CONFLICT(method, url) DO UPDATE SET
  content=excluded.content,
  headers=excluded.headers,
@@ -60,14 +61,47 @@ impl Into<HttpResponse> for &Entry {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct CacheSettings {
     pub client_errors: bool,
     pub server_errors: bool,
     pub ttl: u16,
+    sql: String,
+}
+
+impl CacheSettings {
+    pub fn new(client_errors: bool, server_errors: bool, ttl: u16) -> Self {
+        let mut sql = String::from("SELECT * FROM cache WHERE method = :method AND url = :url");
+        if ttl > 0 {
+            sql += format!(
+                " AND last_update > datetime(CURRENT_TIMESTAMP, '-{} seconds')",
+                ttl
+            )
+            .as_str();
+        }
+        sql += " AND (status_code < 400";
+        if client_errors {
+            sql += " OR status_code BETWEEN 400 AND 499";
+        }
+        if server_errors {
+            sql += " OR status_code BETWEEN 500 AND 599";
+        }
+        sql += ")";
+        CacheSettings {
+            client_errors,
+            server_errors,
+            ttl,
+            sql,
+        }
+    }
+
+    pub fn to_sql(&self) -> &str {
+        self.sql.as_str()
+    }
 }
 
 pub fn create_db(pool: &Pool) -> Result<usize, rusqlite::Error> {
+    log::debug!("Creating database");
     let conn = pool.get().unwrap();
     conn.execute(CREATE_SQL, ())
 }
@@ -142,45 +176,32 @@ pub async fn execute(
     client: &awc::Client,
 ) -> Result<HttpResponse, Error> {
     log::debug!("{:?}", request.uri());
-    let mut select_sql = String::from("SELECT * FROM cache WHERE method = ? AND url = ?");
     let method = request.method().to_string();
-    let mut query_args = vec![method, url.to_string()];
-    if settings.ttl > 0 {
-        select_sql += " AND last_update > datetime(CURRENT_TIMESTAMP, ?)";
-        query_args.push(String::from(format!("-${} seconds", (settings.ttl))));
-    }
-    select_sql += " AND (status_code < 400";
-    if settings.client_errors {
-        select_sql += " OR status_code BETWEEN 400 AND 499";
-    }
-    if settings.server_errors {
-        select_sql += " OR status_code BETWEEN 500 AND 599";
-    }
-    select_sql += ")";
-    log::debug!("{:?}", select_sql);
-    log::debug!("{:?}", query_args);
     let pool = pool.clone();
-
-    let conn = web::block(move || pool.get())
-        .await?
-        .map_err(error::ErrorInternalServerError)?;
-    let mut stmt = conn.prepare(select_sql.as_str()).unwrap();
+    let conn = pool.get().map_err(error::ErrorInternalServerError)?;
+    let mut stmt = conn.prepare_cached(settings.to_sql()).unwrap();
     let mut entry_iter = stmt
-        .query_map(params_from_iter(query_args), |row| {
-            let status_code = StatusCode::from_u16(row.get("status_code").unwrap()).unwrap();
-            let m: String = row.get("method").unwrap();
-            Ok(Entry {
-                method: Method::from_str(m.as_str()).unwrap(),
-                url: row.get("url")?,
-                content: row.get("content")?,
-                headers: row.get("headers")?,
-                status_code,
-                last_update: row.get("last_update")?,
-            })
-        })
+        .query_map(
+            named_params! {":method": method, ":url": url.to_string()},
+            |row| {
+                let status_code = StatusCode::from_u16(row.get("status_code").unwrap()).unwrap();
+                let m: String = row.get("method").unwrap();
+                Ok(Entry {
+                    method: Method::from_str(m.as_str()).unwrap(),
+                    url: row.get("url")?,
+                    content: row.get("content")?,
+                    headers: row.get("headers")?,
+                    status_code,
+                    last_update: row.get("last_update")?,
+                })
+            },
+        )
         .map_err(error::ErrorInternalServerError)?;
     match entry_iter.next() {
-        Some(x) => x, // x.map(Some),
+        Some(x) => {
+            log::info!("Serving from cache");
+            x
+        }
         None => {
             log::info!("No match, proxying");
             let mut client_req = client.request(request.method().to_owned(), url.to_string());
@@ -213,14 +234,14 @@ pub async fn execute(
             };
             // TODO maybe check with settings if we should save? Or is check only on SELECT?
             log::debug!("Saving to database");
-            let mut stmt = conn.prepare(UPSERT_SQL).unwrap();
-            stmt.execute((
-                &entry.method.to_string(),
-                &entry.url,
-                &entry.content,
-                &entry.headers,
-                &entry.status_code.as_str(),
-            ))
+            let mut stmt = conn.prepare_cached(UPSERT_SQL).unwrap();
+            stmt.execute(named_params! {
+                    ":method": &entry.method.to_string(),
+                    ":url": &entry.url,
+                    ":content": &entry.content,
+                    ":headers": &entry.headers,
+                    ":status_code": &entry.status_code.as_str(),
+            })
             .unwrap();
             Ok(entry)
         }
