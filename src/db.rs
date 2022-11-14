@@ -41,15 +41,15 @@ pub struct Entry {
     pub last_update: DateTime<Utc>,
 }
 
-impl Into<HttpResponse> for &Entry {
-    fn into(self) -> HttpResponse {
-        let mut builder = HttpResponseBuilder::new(self.status_code);
-        for (key, values) in &self.headers.0 {
+impl From<&Entry> for HttpResponse {
+    fn from(entry: &Entry) -> Self {
+        let mut builder = HttpResponseBuilder::new(entry.status_code);
+        for (key, values) in &entry.headers.0 {
             for value in values {
                 builder.append_header((key.to_owned(), value.to_owned()));
             }
         }
-        builder.body(self.content.clone())
+        builder.body(entry.content.clone())
     }
 }
 
