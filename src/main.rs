@@ -58,7 +58,7 @@ impl FromRequest for ShakyUrl {
         // Strip first slash and denormalize url
         // BOTT-INT clients normalize slashes in url path (https://example.com turns to https:/example.com)
         let uri = PATH_RE.replace(uri.as_str(), "${1}//").to_string();
-        match url::Url::parse(&uri.as_str()) {
+        match url::Url::parse(uri.as_str()) {
             Ok(x) => {
                 let scheme = x.scheme();
                 if !(scheme == "https" || scheme == "http") {
@@ -77,7 +77,7 @@ impl TryFrom<&str> for ShakyUrl {
 
     fn try_from(uri: &str) -> Result<Self, Self::Error> {
         let uri = PATH_RE.replace(uri, "${1}//").to_string();
-        match url::Url::parse(&uri.as_str()) {
+        match url::Url::parse(uri.as_str()) {
             Ok(x) => {
                 let scheme = x.scheme();
                 if !(scheme == "https" || scheme == "http") {
@@ -98,7 +98,7 @@ async fn cache(
     url: ShakyUrl,
     req: HttpRequest,
 ) -> Result<HttpResponse, AWError> {
-    if req.method() == &actix_web::http::Method::OPTIONS {
+    if req.method() == actix_web::http::Method::OPTIONS {
         log::info!("Ignoring {} request", req.method());
         let mut res = HttpResponse::Ok();
         res.append_header(("access-control-allow-origin", "*"));
