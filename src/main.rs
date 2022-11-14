@@ -126,7 +126,7 @@ async fn main() -> std::io::Result<()> {
     db::create_db(&pool).unwrap();
 
     let settings = db::CacheSettings::new(true, false, 0);
-    log::info!("starting HTTP proxy server at http://localhost:8080/proxy/");
+    log::info!("starting HTTP proxy server at http://localhost:8080/");
     let client_tls_config = Arc::new(rustls_config());
     // start HTTP server
     HttpServer::new(move || {
@@ -143,7 +143,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(client))
             // .app_data(web::Data::new(select_sql))
             .wrap(middleware::Logger::default())
-            .service(web::resource("/proxy/{url_no_query:https?:/.*}").route(web::to(cache)))
+            .service(web::resource("/{url_no_query:https?:/.*}").route(web::to(cache)))
             .default_service(web::to(not_found))
     })
     .bind(("127.0.0.1", 8080))? // TODO
