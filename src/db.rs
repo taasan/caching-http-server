@@ -8,7 +8,6 @@ use actix_web::{
 use chrono::{DateTime, Utc};
 use r2d2_sqlite::rusqlite::named_params;
 use rusqlite::{types::FromSql, Row, ToSql};
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 pub type Pool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
@@ -45,16 +44,9 @@ pub struct Entry {
 impl Into<HttpResponse> for &Entry {
     fn into(self) -> HttpResponse {
         let mut builder = HttpResponseBuilder::new(self.status_code);
-        for (key, value) in &self.headers.0 {
-            match value {
-                ListOrString::ListV(values) => {
-                    for value in values {
-                        builder.append_header((key.to_owned(), value.to_owned()));
-                    }
-                }
-                ListOrString::StringV(value) => {
-                    builder.append_header((key.to_owned(), value.to_owned()));
-                }
+        for (key, values) in &self.headers.0 {
+            for value in values {
+                builder.append_header((key.to_owned(), value.to_owned()));
             }
         }
         builder.body(self.content.clone())
@@ -122,43 +114,20 @@ pub fn create_db(pool: &Pool) -> Result<usize, rusqlite::Error> {
     conn.execute(CREATE_SQL, ())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-enum ListOrString {
-    ListV(Vec<String>),
-    StringV(String),
-}
-
 #[derive(Debug)]
-pub struct HttpHeaders(HashMap<String, ListOrString>);
+pub struct HttpHeaders(HashMap<String, Vec<String>>);
 
 impl From<&HeaderMap> for HttpHeaders {
     fn from(headers: &HeaderMap) -> Self {
-        let mut m: HashMap<String, ListOrString> = HashMap::new();
+        let mut m: HashMap<String, Vec<String>> = HashMap::new();
         for k in headers.keys() {
-            let values: Vec<&http::header::HeaderValue> = headers.get_all(k).collect();
-            match values[..] {
-                [x] => {
-                    m.insert(
-                        k.to_string(),
-                        ListOrString::StringV(x.to_str().unwrap().into()),
-                    );
-                }
-                _ => {
-                    m.insert(
-                        k.to_string(),
-                        ListOrString::ListV(
-                            values.iter().map(|x| x.to_str().unwrap().into()).collect(),
-                        ),
-                    );
-                    for value in values {
-                        m.insert(
-                            k.to_string(),
-                            ListOrString::StringV(value.to_str().unwrap().into()),
-                        );
-                    }
-                }
-            };
+            m.insert(
+                k.to_string(),
+                headers
+                    .get_all(k)
+                    .map(|x| x.to_str().unwrap().into())
+                    .collect(),
+            );
         }
         Self(m)
     }
