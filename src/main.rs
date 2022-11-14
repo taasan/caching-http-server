@@ -116,11 +116,15 @@ async fn cache(
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
-
-    // connect to SQLite DB
-    let manager = SqliteConnectionManager::file("cache.db"); // TODO
+    // Database
+    let db_path = Some("cache.db");
+    let manager = match db_path {
+        Some(path) => SqliteConnectionManager::file(path),
+        None => SqliteConnectionManager::memory(),
+    };
     let pool = Pool::new(manager).unwrap();
     db::create_db(&pool).unwrap();
+
     let settings = db::CacheSettings::new(true, false, 0);
     log::info!("starting HTTP proxy server at http://localhost:8080/proxy/");
     let client_tls_config = Arc::new(rustls_config());
