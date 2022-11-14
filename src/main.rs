@@ -53,7 +53,7 @@ impl FromRequest for ShakyUrl {
             } else {
                 format!("?{}", req.query_string())
             },
-        ); // req.uri().to_string();
+        );
         log::debug!("Extracted url from request {}", uri);
         // Strip first slash and denormalize url
         // BOTT-INT clients normalize slashes in url path (https://example.com turns to https:/example.com)
