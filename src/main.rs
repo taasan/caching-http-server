@@ -160,7 +160,7 @@ impl ToString for DatabaseSource {
 
 #[derive(Parser, Debug, Clone)]
 struct Cli {
-    #[arg(short, long, default_value_t = String::from("localhost:8080"))]
+    #[arg(short, long, default_value_t = String::from("localhost:7776"))]
     bind: String,
 
     #[arg(short, long, value_name = "FILE", default_value_t = DatabaseSource::InMemory)]
