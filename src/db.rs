@@ -164,7 +164,6 @@ pub async fn execute(
 ) -> Result<HttpResponse, Error> {
     log::debug!("{:?}", request.uri());
     let method = request.method().to_string();
-    let pool = pool.clone();
     let conn = pool.get().map_err(error::ErrorInternalServerError)?;
     let mut stmt = conn.prepare_cached(settings.to_sql()).unwrap();
     let mut entry_iter = stmt
@@ -231,7 +230,6 @@ pub struct Stats {
 }
 
 pub async fn get_stats(pool: &Pool) -> Result<Json<Stats>, Error> {
-    let pool = pool.clone();
     let conn = pool.get().map_err(error::ErrorInternalServerError)?;
     let mut stmt = conn
         .prepare_cached("SELECT COUNT(*) as c FROM cache")
