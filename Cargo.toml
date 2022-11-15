@@ -28,3 +28,4 @@ awc = { version = "3.0", features = ["rustls"] }
 http = "*"
 rustls = "*"
 webpki-roots = "*"
+clap = { version = "4.0.24", features = ["derive"] }

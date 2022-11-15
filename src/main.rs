@@ -7,6 +7,7 @@ use actix_web::{
     web::{self},
     App, Error as AWError, FromRequest, HttpRequest, HttpResponse, HttpServer, ResponseError,
 };
+use clap::Parser;
 use futures_util::future::{err, ok, Ready};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 
@@ -124,20 +125,74 @@ async fn get_settings(
     Ok(web::Json(settings))
 }
 
+#[derive(Debug, Clone)]
+enum DatabaseSource {
+    InMemory,
+    File(std::path::PathBuf),
+}
+
+impl From<DatabaseSource> for SqliteConnectionManager {
+    fn from(source: DatabaseSource) -> Self {
+        match source {
+            DatabaseSource::InMemory => SqliteConnectionManager::memory(),
+            DatabaseSource::File(path) => SqliteConnectionManager::file(path),
+        }
+    }
+}
+
+impl From<String> for DatabaseSource {
+    fn from(path: String) -> Self {
+        if path.is_empty() || path == *":memory:" {
+            return DatabaseSource::InMemory;
+        }
+        DatabaseSource::File(path.into())
+    }
+}
+
+impl ToString for DatabaseSource {
+    fn to_string(&self) -> String {
+        match self {
+            DatabaseSource::InMemory => ":memory:".to_string(),
+            DatabaseSource::File(path) => path.to_string_lossy().to_string(),
+        }
+    }
+}
+
+#[derive(Parser, Debug, Clone)]
+struct Cli {
+    #[arg(short, long, default_value_t = String::from("localhost:8080"))]
+    bind: String,
+
+    #[arg(short, long, value_name = "FILE", default_value_t = DatabaseSource::InMemory)]
+    database: DatabaseSource,
+
+    #[arg(short, long, value_name = "SECONDS", default_value_t = 0)]
+    ttl: u16,
+
+    #[arg(long)]
+    no_client_errors: bool,
+
+    #[arg(long)]
+    server_errors: bool,
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    let cli_args = Cli::parse();
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
+    log::debug!("{:?}", cli_args);
     // Database
-    let db_path = Some("cache.db");
-    let manager = match db_path {
-        Some(path) => SqliteConnectionManager::file(path),
-        None => SqliteConnectionManager::memory(),
-    };
+    let manager: SqliteConnectionManager = cli_args.database.into();
     let pool = Pool::new(manager).unwrap();
     db::create_db(&pool).unwrap();
 
-    let settings = db::CacheSettings::new(true, false, 0);
-    log::info!("starting HTTP proxy server at http://localhost:8080/");
+    let settings = db::CacheSettings::new(
+        !cli_args.no_client_errors,
+        cli_args.server_errors,
+        cli_args.ttl,
+    );
+    log::debug!("{:?}", settings);
+    log::info!("starting HTTP proxy server at {}", cli_args.bind);
     let client_tls_config = Arc::new(rustls_config());
     // start HTTP server
     HttpServer::new(move || {
@@ -159,7 +214,7 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource("/stats").route(web::to(get_stats)))
             .default_service(web::to(not_found))
     })
-    .bind(("127.0.0.1", 8080))? // TODO
+    .bind(cli_args.bind)? // TODO
     .worker_max_blocking_threads(1) // TODO
     .workers(1) // TODO
     .run()
