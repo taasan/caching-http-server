@@ -18,3 +18,8 @@ Options:
 Then you can point your HTTP client to
 <http://localhost:7776/http://example.com/> or whichever (http or
 https) URL you want to visit.
+
+## Build
+
+Build and/or install the project with
+[cargo](https://doc.rust-lang.org/stable/cargo/)
