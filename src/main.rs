@@ -113,6 +113,12 @@ async fn cache(
     Ok(result)
 }
 
+async fn get_settings(
+    settings: web::Data<db::CacheSettings>,
+) -> Result<web::Json<web::Data<db::CacheSettings>>, AWError> {
+    Ok(web::Json(settings))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
@@ -144,6 +150,7 @@ async fn main() -> std::io::Result<()> {
             // .app_data(web::Data::new(select_sql))
             .wrap(middleware::Logger::default())
             .service(web::resource("/{url_no_query:https?:/.*}").route(web::to(cache)))
+            .service(web::resource("/settings").route(web::to(get_settings)))
             .default_service(web::to(not_found))
     })
     .bind(("127.0.0.1", 8080))? // TODO

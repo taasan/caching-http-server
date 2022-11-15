@@ -8,6 +8,7 @@ use actix_web::{
 use chrono::{DateTime, Utc};
 use r2d2_sqlite::rusqlite::named_params;
 use rusqlite::{types::FromSql, Row, ToSql};
+use serde::Serialize;
 use url::Url;
 
 pub type Pool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
@@ -69,7 +70,7 @@ impl TryFrom<&Row<'_>> for Entry {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CacheSettings {
     pub client_errors: bool,
     pub server_errors: bool,
