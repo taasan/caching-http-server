@@ -3,6 +3,7 @@ use std::{collections::HashMap, str::FromStr};
 use actix_web::{
     error,
     http::{header::HeaderMap, Method, StatusCode},
+    web::Json,
     Error, HttpRequest, HttpResponse, HttpResponseBuilder,
 };
 use chrono::{DateTime, Utc};
@@ -222,4 +223,19 @@ pub async fn execute(
     }
     .map(|entry| Ok((&entry).into()))
     .map_err(error::ErrorInternalServerError)?
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Stats {
+    urls: usize,
+}
+
+pub async fn get_stats(pool: &Pool) -> Result<Json<Stats>, Error> {
+    let pool = pool.clone();
+    let conn = pool.get().map_err(error::ErrorInternalServerError)?;
+    let mut stmt = conn
+        .prepare_cached("SELECT COUNT(*) as c FROM cache")
+        .unwrap();
+    stmt.query_row((), |row| row.get("c").map(|urls| Json(Stats { urls })))
+        .map_err(error::ErrorInternalServerError)
 }
