@@ -1,0 +1,9 @@
+*
+!src/**
+!.github/workflows/build.yml
+!.github/workflows/clippy.yml
+!.gitignore
+!Cargo.lock
+!Cargo.toml
+!GNUmakefile
+!README.org
