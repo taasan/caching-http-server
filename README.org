@@ -136,35 +136,29 @@
   }
 
   #[derive(Debug, Clone)]
-  enum DatabaseSource {
-      InMemory,
-      File(std::path::PathBuf),
-  }
+  struct DatabaseSource(std::path::PathBuf);
 
   impl From<DatabaseSource> for SqliteConnectionManager {
       fn from(source: DatabaseSource) -> Self {
-          match source {
-              DatabaseSource::InMemory => SqliteConnectionManager::memory(),
-              DatabaseSource::File(path) => SqliteConnectionManager::file(path),
-          }
+          SqliteConnectionManager::file(source.0)
       }
   }
 
   impl From<String> for DatabaseSource {
       fn from(path: String) -> Self {
-          if path.is_empty() || path == *":memory:" {
-              return DatabaseSource::InMemory;
-          }
-          DatabaseSource::File(path.into())
+          DatabaseSource(path.into())
+      }
+  }
+
+  impl From<&str> for DatabaseSource {
+      fn from(path: &str) -> Self {
+          DatabaseSource(path.into())
       }
   }
 
   impl ToString for DatabaseSource {
       fn to_string(&self) -> String {
-          match self {
-              DatabaseSource::InMemory => ":memory:".to_string(),
-              DatabaseSource::File(path) => path.to_string_lossy().to_string(),
-          }
+          self.0.to_string_lossy().to_string()
       }
   }
 
@@ -173,7 +167,7 @@
       #[arg(short, long, default_value_t = String::from("localhost:7776"))]
       bind: String,
 
-      #[arg(short, long, value_name = "FILE", default_value_t = DatabaseSource::InMemory)]
+      #[arg(short, long, value_name = "FILE", default_value_t = ("cache.db").into())]
       database: DatabaseSource,
 
       #[arg(short, long, value_name = "SECONDS", default_value_t = 0)]
