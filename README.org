@@ -12,6 +12,7 @@
 
   use actix_web::{
       dev::Payload,
+      error,
       http::StatusCode,
       middleware,
       web::{self},
@@ -116,7 +117,9 @@
           res.append_header(("access-control-allow-headers", "*"));
           return Ok(res.finish());
       }
-      let result = db::execute(&settings, &pool, &req, &url.0, &client).await?;
+      let result = db::execute(&settings, &pool, &req, &url.0, &client)
+          .await
+          .map_err(error::ErrorInternalServerError)?;
       log::debug!("{result:?}");
       log::debug!("{:?}", req.match_info());
       log::debug!("ShakyUrl: {:?}", url);
@@ -309,17 +312,56 @@
       }
   }
 
+  #[derive(Debug)]
+  pub enum InvalidEntry {
+      RusqliteError(rusqlite::Error),
+      InvalidMethod(http::method::InvalidMethod),
+      InvalidStatusCode(http::status::InvalidStatusCode),
+  }
+
+  impl std::error::Error for InvalidEntry {}
+
+  impl std::fmt::Display for InvalidEntry {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+          match self {
+              InvalidEntry::RusqliteError(err) => err.fmt(f),
+              InvalidEntry::InvalidMethod(err) => err.fmt(f),
+              InvalidEntry::InvalidStatusCode(err) => err.fmt(f),
+          }
+      }
+  }
+
+  impl From<http::status::InvalidStatusCode> for InvalidEntry {
+      fn from(err: http::status::InvalidStatusCode) -> InvalidEntry {
+          InvalidEntry::InvalidStatusCode(err)
+      }
+  }
+
+  impl From<http::method::InvalidMethod> for InvalidEntry {
+      fn from(err: http::method::InvalidMethod) -> InvalidEntry {
+          InvalidEntry::InvalidMethod(err)
+      }
+  }
+
+  impl From<rusqlite::Error> for InvalidEntry {
+      fn from(err: rusqlite::Error) -> InvalidEntry {
+          InvalidEntry::RusqliteError(err)
+      }
+  }
+
   impl TryFrom<&Row<'_>> for Entry {
-      type Error = rusqlite::Error;
+      type Error = InvalidEntry;
 
       fn try_from(row: &Row<'_>) -> Result<Self, Self::Error> {
           let m: String = row.get("method")?;
+          let method = Method::from_str(m.as_str())?;
+          let status_code = StatusCode::from_u16(row.get("status_code")?)?;
           Ok(Entry {
-              method: Method::from_str(m.as_str()).unwrap(),
+              method,
               url: row.get("url")?,
               content: row.get("content")?,
               headers: row.get("headers")?,
-              status_code: StatusCode::from_u16(row.get("status_code")?).unwrap(),
+              status_code,
               last_update: row.get("last_update")?,
           })
       }
@@ -364,10 +406,10 @@
       }
   }
 
-  pub fn create_db(pool: &Pool) -> Result<usize, rusqlite::Error> {
+  pub fn create_db(pool: &Pool) -> Result<usize, Box<dyn std::error::Error>> {
       log::debug!("Creating database");
-      let conn = pool.get().unwrap();
-      conn.execute(CREATE_SQL, ())
+      let conn = pool.get()?;
+      Ok(conn.execute(CREATE_SQL, ())?)
   }
 
   #[derive(Debug)]
@@ -415,22 +457,21 @@
       request: &HttpRequest,
       url: &Url,
       client: &awc::Client,
-  ) -> Result<HttpResponse, Error> {
+  ) -> Result<HttpResponse, Box<dyn std::error::Error>> {
       log::debug!("{:?}", request.uri());
       let method = request.method().to_string();
-      let conn = pool.get().map_err(error::ErrorInternalServerError)?;
-      let mut stmt = conn.prepare_cached(settings.to_sql()).unwrap();
-      let mut entry_iter = stmt
-          .query_map(
-              named_params! {":method": method, ":url": url.to_string()},
-              |row| Entry::try_from(row),
-          )
-          .map_err(error::ErrorInternalServerError)?;
+      let conn = pool.get()?;
+      let mut stmt = conn.prepare_cached(settings.to_sql())?;
+      let mut entry_iter = stmt.query_map(
+          named_params! {":method": method, ":url": url.to_string()},
+          |row| Ok(Entry::try_from(row)),
+      )?;
       match entry_iter.next() {
-          Some(x) => {
+          Some(Ok(x)) => {
               log::info!("Serving from cache");
               x
           }
+          Some(Err(x)) => Err(x.into()),
           None => {
               log::info!("No match, proxying");
               let mut client_req = client.request(request.method().to_owned(), url.to_string());
@@ -439,8 +480,8 @@
               }
               client_req = client_req.insert_header(("host", url.host().unwrap().to_string()));
               log::debug!("{} {}", client_req.get_method(), client_req.get_uri());
-              let mut res = client_req.send().await.unwrap();
-              let content = res.body().limit(core::usize::MAX).await.unwrap(); // TODO limit
+              let mut res = client_req.send().await?;
+              let content = res.body().limit(core::usize::MAX).await?; // TODO limit
               log::debug!("Response: {:?}", res); // <- server http response
               let mut client_response = HttpResponse::build(res.status());
               for (header_name, header_value) in res
@@ -462,20 +503,18 @@
               };
               // TODO maybe check with settings if we should save? Or is check only on SELECT?
               log::debug!("Saving to database");
-              let mut stmt = conn.prepare_cached(UPSERT_SQL).unwrap();
+              let mut stmt = conn.prepare_cached(UPSERT_SQL)?;
               stmt.execute(named_params! {
                       ":method": &entry.method.to_string(),
                       ":url": &entry.url,
                       ":content": &entry.content,
                       ":headers": &entry.headers,
                       ":status_code": &entry.status_code.as_str(),
-              })
-              .unwrap();
+              })?;
               Ok(entry)
           }
       }
-      .map(|entry| Ok((&entry).into()))
-      .map_err(error::ErrorInternalServerError)?
+      .map(|entry| Ok((&entry).into()))?
   }
 
   #[derive(Debug, Clone, Serialize)]
@@ -487,7 +526,7 @@
       let conn = pool.get().map_err(error::ErrorInternalServerError)?;
       let mut stmt = conn
           .prepare_cached("SELECT COUNT(*) as c FROM cache")
-          .unwrap();
+          .map_err(error::ErrorInternalServerError)?;
       stmt.query_row((), |row| row.get("c").map(|urls| Json(Stats { urls })))
           .map_err(error::ErrorInternalServerError)
   }
