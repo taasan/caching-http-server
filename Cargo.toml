@@ -26,6 +26,6 @@ lazy-regex = "2.3"
 url = "2.3"
 awc = { version = "3.0", features = ["rustls"] }
 http = "*"
-rustls = "*"
+rustls = "0.20.0" # Make sure this is compatible with awc
 webpki-roots = "*"
 clap = { version = "4.0.24", features = ["derive"] }
