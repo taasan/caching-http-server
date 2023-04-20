@@ -8,8 +8,6 @@
 ** Server                                                              :Code:
 
 #+begin_src rust :tangle "src/main.rs"
-  use std::sync::Arc;
-
   use actix_web::{
       dev::Payload,
       error,
@@ -201,7 +199,6 @@
       );
       log::debug!("{:?}", settings);
       log::info!("starting HTTP proxy server at {}", cli_args.bind);
-      let client_tls_config = Arc::new(rustls_config());
       // start HTTP server
       HttpServer::new(move || {
           let client = awc::Client::builder()
@@ -209,7 +206,7 @@
               // Some sites require a User-Agent header to make requests
               .add_default_header(("user-agent", "caching-http-server/1.0"))
               // a "connector" wraps the stream into an encrypted connection
-              .connector(awc::Connector::new().rustls(Arc::clone(&client_tls_config)))
+              .connector(awc::Connector::new())
               .finish();
           App::new()
               .app_data(web::Data::new(settings.clone()))
@@ -233,23 +230,6 @@
       Ok(HttpResponse::build(StatusCode::NOT_FOUND)
           .content_type("application/json")
           .body(r#"{"errors": [{"status": "404"}]}"#))
-  }
-
-  /// Create simple rustls client config from root certificates.
-  fn rustls_config() -> rustls::ClientConfig {
-      let mut root_store = rustls::RootCertStore::empty();
-      root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-          rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
-              ta.subject,
-              ta.spki,
-              ta.name_constraints,
-          )
-      }));
-
-      rustls::ClientConfig::builder()
-          .with_safe_defaults()
-          .with_root_certificates(root_store)
-          .with_no_client_auth()
   }
 #+end_src
 
