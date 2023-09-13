@@ -185,7 +185,7 @@
   #[actix_web::main]
   async fn main() -> std::io::Result<()> {
       let cli_args = Cli::parse();
-      env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
+      env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
       log::debug!("{:?}", cli_args);
       // Database
       let manager: SqliteConnectionManager = cli_args.database.into();
