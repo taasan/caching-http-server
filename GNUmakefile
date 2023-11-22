@@ -4,7 +4,7 @@ build: tangle
 
 .PHONY: install
 install: tangle
-	cargo install --path .
+	cargo install --locked --offline --frozen --path .
 
 .PHONY: run
 run: tangle
