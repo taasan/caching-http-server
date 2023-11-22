@@ -24,5 +24,10 @@ tangle: README.org src
 src:
 	mkdir $@
 
+.PHONY: clean
+clean:
+	$(RM) -r src/
+	$(RM) -r target/
+
 caching-http-server.src.tar.gz: tangle
 	tar cfz $@ Cargo.toml src $$(git ls-files)
