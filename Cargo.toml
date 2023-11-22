@@ -11,8 +11,8 @@ env_logger = "0.10"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 log = "0.4"
 r2d2 = "0.8"
-r2d2_sqlite = "0.22"
-rusqlite = { version = "0.29", features = [
+r2d2_sqlite = "0.23.0"
+rusqlite = { version = "0.30.0", features = [
     "bundled",
     "chrono",
     "url",
@@ -25,5 +25,5 @@ chrono = { version = "0.4", default-features = false }
 lazy-regex = "3"
 url = "2"
 awc = { version = "3", features = ["rustls"] }
-http = "*"
+http = "0.2.11"  # Same as awc
 clap = { version = "4", features = ["derive"] }
