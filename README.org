@@ -180,6 +180,9 @@
 
       #[arg(long)]
       server_errors: bool,
+
+      #[arg(long)]
+      online: bool,
   }
 
   #[actix_web::main]
@@ -195,6 +198,7 @@
       let settings = db::CacheSettings::new(
           !cli_args.no_client_errors,
           cli_args.server_errors,
+          cli_args.online,
           cli_args.ttl,
       );
       log::debug!("{:?}", settings);
@@ -294,6 +298,17 @@
   }
 
   #[derive(Debug)]
+  pub struct NotOnlineError;
+
+  impl std::error::Error for NotOnlineError {}
+
+  impl std::fmt::Display for NotOnlineError {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+          write!(f, "We are not online")
+      }
+  }
+
+  #[derive(Debug)]
   pub enum InvalidEntry {
       RusqliteError(rusqlite::Error),
       InvalidMethod(http::method::InvalidMethod),
@@ -352,12 +367,13 @@
   pub struct CacheSettings {
       pub client_errors: bool,
       pub server_errors: bool,
+      pub online: bool,
       pub ttl: u16,
       sql: String,
   }
 
   impl CacheSettings {
-      pub fn new(client_errors: bool, server_errors: bool, ttl: u16) -> Self {
+      pub fn new(client_errors: bool, server_errors: bool, online: bool, ttl: u16) -> Self {
           let mut sql = String::from("SELECT * FROM cache WHERE method = :method AND url = :url");
           if ttl > 0 {
               sql += format!(
@@ -377,6 +393,7 @@
           CacheSettings {
               client_errors,
               server_errors,
+              online,
               ttl,
               sql,
           }
@@ -454,6 +471,9 @@
           }
           Some(Err(x)) => Err(x.into()),
           None => {
+              if !settings.online {
+                  Err(NotOnlineError)?
+              }
               log::info!("No match, proxying");
               let mut client_req = client.request(request.method().to_owned(), url.to_string());
               for header in request.headers() {
