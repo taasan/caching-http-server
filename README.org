@@ -3,6 +3,13 @@
 #+OPTIONS: H:3 toc:2
 #+STARTUP: overview
 
+* TODO Roadmap [0/2]
+  - [ ] Minimize dependencies [0/2]
+    1. [ ] Replace http client
+    2. [ ] Replace http server
+  - [ ] Configuration [0/1]
+    - [ ] Select which methods we are allowed to proxy
+
 * Code
 
 ** Server                                                              :Code:
