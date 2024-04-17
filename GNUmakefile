@@ -2,6 +2,14 @@
 build: tangle
 	cargo build --release
 
+.PHONY: check
+check: tangle
+	cargo check
+
+.PHONY: fmt-check
+fmt-check: tangle
+	cargo fmt --all --check
+
 .PHONY: install
 install: tangle
 	cargo fetch
