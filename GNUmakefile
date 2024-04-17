@@ -4,6 +4,7 @@ build: tangle
 
 .PHONY: install
 install: tangle
+	cargo fetch
 	cargo install --locked --offline --frozen --path .
 
 .PHONY: run
