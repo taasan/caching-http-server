@@ -26,6 +26,7 @@
   use clap::Parser;
   use futures_util::future::{err, ok, Ready};
   use r2d2_sqlite::{self, SqliteConnectionManager};
+  use std::num::NonZeroUsize;
 
   mod db;
   use db::Pool;
@@ -176,6 +177,12 @@
       #[arg(short, long, default_value_t = String::from("localhost:7776"))]
       bind: String,
 
+      #[arg(long)]
+      workers: Option<NonZeroUsize>,
+
+      #[arg(long)]
+      worker_max_blocking_threads: Option<NonZeroUsize>,
+
       #[arg(short, long, value_name = "FILE", default_value_t = ("cache.db").into())]
       database: DatabaseSource,
 
@@ -211,7 +218,7 @@
       log::debug!("{:?}", settings);
       log::info!("starting HTTP proxy server at {}", cli_args.bind);
       // start HTTP server
-      HttpServer::new(move || {
+      let mut builder = HttpServer::new(move || {
           let client = awc::Client::builder()
               .disable_timeout()
               // Some sites require a User-Agent header to make requests
@@ -230,11 +237,15 @@
               .service(web::resource("/stats").route(web::to(get_stats)))
               .default_service(web::to(not_found))
       })
-      .bind(cli_args.bind)? // TODO
-      .worker_max_blocking_threads(1) // TODO
-      .workers(1) // TODO
-      .run()
-      .await
+      .bind(cli_args.bind)?;
+      if let Some(workers) = cli_args.workers {
+          builder = builder.workers(workers.get());
+      }
+      if let Some(worker_max_blocking_threads) = cli_args.worker_max_blocking_threads {
+          builder = builder.worker_max_blocking_threads(worker_max_blocking_threads.get());
+      }
+
+      builder.run().await
   }
 
   async fn not_found() -> Result<HttpResponse, AWError> {
