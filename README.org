@@ -272,7 +272,7 @@
    status_code INTEGER,
    last_update TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
    PRIMARY KEY (method, url)
-  )";
+  ) STRICT";
 
   const UPSERT_SQL: &str = "
   INSERT INTO cache (method, url, content, headers, status_code) VALUES (:method, :url, :content, :headers, :status_code)
